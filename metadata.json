@@ -1,0 +1,6 @@
+{
+  "name": "Nexa IDE",
+  "description": "Professional Android Mobile IDE & Cloud APK Builder powered by GitHub Actions",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
