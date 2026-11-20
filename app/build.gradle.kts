@@ -7,7 +7,9 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  // Stable API 36 (Android 16): preinstalled on GitHub ubuntu-latest and satisfies androidx.core 1.18.0.
+  // The previous 36.1 minor release forced sdkmanager to fetch a non-standard platform.
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.nexaide.qkrzyx"

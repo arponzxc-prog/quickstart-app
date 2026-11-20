@@ -359,6 +359,12 @@ class BuildEngine(
                                         if (cleanLine.contains("Minimum supported Gradle version")) {
                                             if (!extractedLines.contains(cleanLine)) extractedLines.add(cleanLine)
                                         }
+
+                                        // Explicit diagnostics emitted by the workflow (SDK install, JDK, missing output...)
+                                        if (cleanLine.contains("[NEXA-ERROR]")) {
+                                            val msg = cleanLine.substringAfter("[NEXA-ERROR]").trim()
+                                            if (msg.isNotBlank() && !extractedLines.contains(msg)) extractedLines.add(msg)
+                                        }
                                     }
 
                                     if (kotlinErrors.isNotEmpty()) {
