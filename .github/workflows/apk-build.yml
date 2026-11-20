@@ -1,0 +1,55 @@
+name: APK Build
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Setting up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+
+      - name: Installing SDK platforms
+        shell: bash
+        run: |
+          export PATH="$(ls -d $ANDROID_HOME/cmdline-tools/*/bin | head -1):$PATH"; yes | sdkmanager --licenses > /dev/null || true
+          SDKS=$(grep -rhoE "compileSdk(Version)?[ =(]+[0-9]+" --include=build.gradle --include=build.gradle.kts . 2>/dev/null | grep -oE "[0-9]+" | sort -un | tr '\n' ' ')
+          for s in $SDKS 34; do sdkmanager "platforms;android-$s" > /dev/null || true; done
+          sdkmanager "build-tools;34.0.0" "platform-tools" > /dev/null || true
+
+      - name: Running Gradle
+        shell: bash
+        run: |
+          if [ -f gradlew ] && [ -f gradle/wrapper/gradle-wrapper.jar ]; then
+            chmod +x gradlew; G=./gradlew
+          else
+            echo "No Gradle wrapper jar found, using the runner's Gradle"; G=gradle
+          fi
+          echo "Using $G"
+          $G :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Packaging APK
+        shell: bash
+        run: |
+          mkdir -p apk-out
+          find "app" -path '*build/outputs/apk/*' -name '*.apk' -exec cp {} apk-out/ \; 2>/dev/null || true
+          if [ -z "$(ls -A apk-out)" ]; then
+            find . -path '*build/outputs/apk/*' -name '*.apk' -not -path './apk-out/*' -exec cp {} apk-out/ \;
+          fi
+          ls -la apk-out
+          ls apk-out/*.apk > /dev/null 2>&1 || { echo "No APK was produced"; exit 1; }
+
+      - name: Uploading APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: apk-out/*.apk
+          if-no-files-found: error

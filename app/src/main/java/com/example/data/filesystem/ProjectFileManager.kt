@@ -662,14 +662,12 @@ class ProjectFileManager(private val context: Context) {
 
         return files.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).map { file ->
             if (file.isDirectory) {
-                val children = getFileTree(file)
                 FileNode(
                     name = file.name,
                     path = file.absolutePath,
                     isDirectory = true,
-                    // Sum children sizes bottom-up instead of re-walking the folder (was quadratic)
-                    sizeBytes = children.sumOf { it.sizeBytes },
-                    children = children
+                    sizeBytes = getFolderSize(file),
+                    children = getFileTree(file)
                 )
             } else {
                 FileNode(
@@ -788,25 +786,57 @@ class ProjectFileManager(private val context: Context) {
     }
 
     fun importProjectFromZip(inputStream: InputStream, projectName: String): ProjectEntity? {
+        val projectId = UUID.randomUUID().toString()
+        val projectDir = getProjectDirectory(projectId)
         return try {
-            val projectId = UUID.randomUUID().toString()
-            val projectDir = getProjectDirectory(projectId)
-
             val canonicalRootDir = projectDir.canonicalFile
+            val maxFiles = 500
+            val maxTotalSize = 50 * 1024 * 1024L // 50 MB
+            val maxEntrySize = 15 * 1024 * 1024L // 15 MB
+            var totalExtractedSize = 0L
+            var fileCount = 0
+
             ZipInputStream(inputStream).use { zis ->
                 var entry: ZipEntry? = zis.nextEntry
                 while (entry != null) {
-                    val file = File(projectDir, entry.name)
-                    val canonicalFile = file.canonicalFile
-                    if (!canonicalFile.path.startsWith(canonicalRootDir.path + File.separator)) {
-                        throw SecurityException("Zip Slip vulnerability detected: ${entry.name}")
+                    fileCount++
+                    if (fileCount > maxFiles) {
+                        throw SecurityException("ZIP import error: Exceeded maximum file count ($maxFiles)")
                     }
+
+                    val name = entry.name
+                    if (name.contains("..") || name.startsWith("/") || name.startsWith("\\")) {
+                        throw SecurityException("ZIP Slip path traversal detected: $name")
+                    }
+
+                    val file = File(projectDir, name)
+                    val canonicalFile = file.canonicalFile
+                    if (!canonicalFile.path.startsWith(canonicalRootDir.path + File.separator) && canonicalFile != canonicalRootDir) {
+                        throw SecurityException("ZIP Slip vulnerability detected: $name")
+                    }
+
+                    val relativePath = canonicalFile.path.substring(canonicalRootDir.path.length)
+                    val depth = relativePath.split(File.separator).size
+                    if (depth > 12) {
+                        throw SecurityException("ZIP import error: Exceeded maximum directory depth")
+                    }
+
                     if (entry.isDirectory) {
                         file.mkdirs()
                     } else {
                         file.parentFile?.mkdirs()
                         FileOutputStream(file).use { fos ->
-                            zis.copyTo(fos)
+                            var bytesRead = 0L
+                            val buffer = ByteArray(8192)
+                            var read: Int
+                            while (zis.read(buffer).also { read = it } != -1) {
+                                bytesRead += read
+                                totalExtractedSize += read
+                                if (bytesRead > maxEntrySize || totalExtractedSize > maxTotalSize) {
+                                    throw SecurityException("ZIP import error: Exceeded maximum file or total size limit")
+                                }
+                                fos.write(buffer, 0, read)
+                            }
                         }
                     }
                     zis.closeEntry()
@@ -829,7 +859,7 @@ class ProjectFileManager(private val context: Context) {
             ProjectEntity(
                 id = projectId,
                 name = projectName,
-                packageName = "com.imported.${projectName.lowercase().replace(" ", "")}",
+                packageName = "com.imported.${projectName.lowercase().replace(" ", "").replace(Regex("[^a-z0-9]"), "")}",
                 templateType = "Imported Project",
                 rootPath = projectDir.absolutePath,
                 language = "Kotlin",
@@ -838,6 +868,7 @@ class ProjectFileManager(private val context: Context) {
             )
         } catch (e: Exception) {
             e.printStackTrace()
+            projectDir.deleteRecursively()
             null
         }
     }

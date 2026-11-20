@@ -193,6 +193,9 @@ fun SettingsScreen(
                 }
             }
 
+            // AI model selection (add / remove / test Gemini model names)
+            item { AiModelSettingsCard() }
+
             // Storage Management
             item {
                 Card(

@@ -5,12 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Nexa IDE Professional Code Editor</title>
 
-  <!-- CodeMirror Stylesheets -->
-  <link rel="stylesheet" href="lib/codemirror.min.css">
-  <link rel="stylesheet" href="lib/addon/foldgutter.min.css">
-  <link rel="stylesheet" href="lib/theme/material-darker.min.css">
-  <link rel="stylesheet" href="lib/theme/dracula.min.css">
-  <link rel="stylesheet" href="lib/theme/eclipse.min.css">
+  <!-- CodeMirror Bundled Stylesheet -->
+  <link rel="stylesheet" href="bundle.min.css">
 
   <style>
     * {
@@ -36,6 +32,26 @@
       height: 100%;
       overflow: hidden;
       background-color: #0d1117;
+    }
+    #fallback-textarea {
+      display: block;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 12px;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', Menlo, Monaco, Consolas, monospace !important;
+      font-size: 14px;
+      line-height: 20px;
+      background-color: #0d1117;
+      color: #c9d1d9;
+      border: none;
+      outline: none;
+      resize: none;
+      box-sizing: border-box;
+      white-space: pre;
+      overflow: auto;
+      tab-size: 4;
+      -webkit-text-fill-color: #c9d1d9;
     }
     .CodeMirror {
       width: 100% !important;
@@ -82,9 +98,10 @@
     }
 
     /* Light theme adjustments */
-    body.theme-light, body.theme-light #editor-container {
+    body.theme-light, body.theme-light #editor-container, body.theme-light #fallback-textarea {
       background-color: #ffffff !important;
       color: #24292f !important;
+      -webkit-text-fill-color: #24292f !important;
     }
     body.theme-light .cm-s-eclipse.CodeMirror {
       background-color: #ffffff !important;
@@ -100,9 +117,10 @@
     }
 
     /* Dracula theme adjustments */
-    body.theme-dracula, body.theme-dracula #editor-container {
+    body.theme-dracula, body.theme-dracula #editor-container, body.theme-dracula #fallback-textarea {
       background-color: #282a36 !important;
       color: #f8f8f2 !important;
+      -webkit-text-fill-color: #f8f8f2 !important;
     }
 
     /* Fold gutter styling */
@@ -131,42 +149,18 @@
   </style>
 </head>
 <body class="theme-dark">
-  <div id="editor-container"></div>
+  <div id="editor-container">
+    <textarea id="fallback-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Enter code here..."></textarea>
+  </div>
 
-  <!-- CodeMirror Core JS -->
-  <script src="lib/codemirror.min.js"></script>
-
-  <!-- CodeMirror Addons -->
-  <script src="lib/addon/active-line.min.js"></script>
-  <script src="lib/addon/matchbrackets.min.js"></script>
-  <script src="lib/addon/closebrackets.min.js"></script>
-  <script src="lib/addon/foldcode.min.js"></script>
-  <script src="lib/addon/foldgutter.min.js"></script>
-  <script src="lib/addon/brace-fold.min.js"></script>
-  <script src="lib/addon/xml-fold.min.js"></script>
-  <script src="lib/addon/markdown-fold.min.js"></script>
-  <script src="lib/addon/comment-fold.min.js"></script>
-  <script src="lib/addon/searchcursor.min.js"></script>
-  <script src="lib/addon/search.min.js"></script>
-  <script src="lib/addon/jump-to-line.min.js"></script>
-
-  <!-- Modes (ordered by dependency) -->
-  <script src="lib/mode/clike.min.js"></script>
-  <script src="lib/mode/xml.min.js"></script>
-  <script src="lib/mode/javascript.min.js"></script>
-  <script src="lib/mode/css.min.js"></script>
-  <script src="lib/mode/htmlmixed.min.js"></script>
-  <script src="lib/mode/markdown.min.js"></script>
-  <script src="lib/mode/python.min.js"></script>
-  <script src="lib/mode/php.min.js"></script>
-  <script src="lib/mode/sql.min.js"></script>
+  <!-- Single Bundled CodeMirror Core + Addons + Modes -->
+  <script src="bundle.min.js"></script>
 
   <script>
-    window.addEventListener('error', function(e) {
-      console.error('Uncaught: ' + e.message + ' @' + e.filename + ':' + e.lineno);
-    });
     (function() {
       const container = document.getElementById('editor-container');
+      const fallback = document.getElementById('fallback-textarea');
+      let cm = null;
 
       function getModeForLang(lang) {
         const l = (lang || '').toLowerCase().trim();
@@ -203,172 +197,157 @@
             return 'application/x-httpd-php';
           case 'sql':
             return 'text/x-sql';
+          case 'yaml':
+          case 'yml':
+            return 'text/x-yaml';
           default:
             return 'text/plain';
         }
       }
 
-      function createFallbackEditor() {
-        // Plain <textarea> editor used only if CodeMirror fails to initialise,
-        // so the screen is never blank.
-        container.innerHTML = '';
-        const ta = document.createElement('textarea');
-        ta.spellcheck = false;
-        ta.setAttribute('autocapitalize', 'off');
-        ta.setAttribute('autocorrect', 'off');
-        ta.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;outline:0;resize:none;' +
-          'padding:8px 10px 60px 10px;background:#0d1117;color:#c9d1d9;white-space:pre;overflow:auto;' +
-          'font:14px/1.5 Menlo,Monaco,Consolas,monospace;tab-size:4;';
-        container.appendChild(ta);
-        return {
-          _ta: ta,
-          setOption: function(k, v) {
-            if (k === 'lineWrapping') ta.style.whiteSpace = v ? 'pre-wrap' : 'pre';
-          },
-          setValue: function(v) { ta.value = v; },
-          getValue: function() { return ta.value; },
-          clearHistory: function() {},
-          scrollTo: function() { ta.scrollTop = 0; ta.scrollLeft = 0; },
-          setCursor: function() { try { ta.setSelectionRange(0, 0); } catch (e) {} },
-          getCursor: function() {
-            const before = ta.value.substring(0, ta.selectionStart || 0).split('\n');
-            return { line: before.length - 1, ch: before[before.length - 1].length };
-          },
-          refresh: function() {},
-          focus: function() { ta.focus(); },
-          on: function(ev, fn) {
-            if (ev === 'change') ta.addEventListener('input', function() { fn(null, { origin: '+input' }); });
-            if (ev === 'cursorActivity') {
-              ['keyup', 'click', 'touchend'].forEach(function(e) { ta.addEventListener(e, fn); });
-            }
-          },
-          getWrapperElement: function() { return ta; },
-          replaceSelection: function(t) {
-            const a = ta.selectionStart, b = ta.selectionEnd;
-            ta.value = ta.value.substring(0, a) + t + ta.value.substring(b);
-            ta.selectionStart = ta.selectionEnd = a + t.length;
-            ta.dispatchEvent(new Event('input'));
-          },
-          undo: function() {}, redo: function() {},
-          execCommand: function() { ta.select(); },
-          lineCount: function() { return ta.value.split('\n').length; },
-          indentLine: function() {},
-          operation: function(f) { f(); },
-          scrollIntoView: function() {},
-          getSearchCursor: function() { return { findNext: function() { return false; }, from: function() { return null; } }; },
-          somethingSelected: function() { return ta.selectionStart !== ta.selectionEnd; }
-        };
-      }
-
-      let cm;
+      // Initialize CodeMirror safely with fallback protection
       try {
-        if (typeof CodeMirror === 'undefined') throw new Error('CodeMirror library did not load');
-        cm = CodeMirror(container, {
-        value: '',
-        mode: 'text/x-kotlin',
-        theme: 'material-darker',
-        lineNumbers: true,
-        styleActiveLine: true,
-        matchBrackets: true,
-        autoCloseBrackets: true,
-        foldGutter: true,
-        gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
-        lineWrapping: false,
-        tabSize: 4,
-        indentUnit: 4,
-        indentWithTabs: false,
-        smartIndent: true,
-        inputStyle: 'textarea',
-        autofocus: false,
-        extraKeys: {
-          'Tab': function(instance) {
-            if (instance.somethingSelected()) {
-              instance.indentSelection('add');
-            } else {
-              instance.replaceSelection('    ', 'end', '+input');
+        if (typeof CodeMirror !== 'undefined') {
+          cm = CodeMirror(container, {
+            value: '',
+            mode: 'text/x-kotlin',
+            theme: 'material-darker',
+            lineNumbers: true,
+            styleActiveLine: true,
+            matchBrackets: true,
+            autoCloseBrackets: true,
+            foldGutter: true,
+            gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+            lineWrapping: false,
+            tabSize: 4,
+            indentUnit: 4,
+            indentWithTabs: false,
+            smartIndent: true,
+            inputStyle: 'textarea',
+            autofocus: false,
+            extraKeys: {
+              'Tab': function(instance) {
+                if (instance.somethingSelected()) {
+                  instance.indentSelection('add');
+                } else {
+                  instance.replaceSelection('    ', 'end', '+input');
+                }
+              },
+              'Shift-Tab': function(instance) {
+                instance.indentSelection('subtract');
+              }
             }
-          },
-          'Shift-Tab': function(instance) {
-            instance.indentSelection('subtract');
-          }
+          });
+
+          // Successfully created CodeMirror! Hide fallback textarea
+          if (fallback) fallback.style.display = 'none';
+        } else {
+          console.warn('CodeMirror script not ready, using fallback editor.');
+          if (fallback) fallback.style.display = 'block';
         }
-      });
-      } catch (e) {
-        console.error('CodeMirror init failed, using fallback editor: ' + e);
-        cm = createFallbackEditor();
+      } catch (err) {
+        console.error('CodeMirror init failed, activating fallback editor:', err);
+        cm = null;
+        if (fallback) fallback.style.display = 'block';
       }
 
       // Cursor position reporting
       function reportCursor() {
         try {
-          const cur = cm.getCursor();
-          if (window.AndroidBridge && window.AndroidBridge.onCursorMoved) {
-            window.AndroidBridge.onCursorMoved(cur.line + 1, cur.ch + 1);
+          if (cm) {
+            const cur = cm.getCursor();
+            if (window.AndroidBridge && window.AndroidBridge.onCursorMoved) {
+              window.AndroidBridge.onCursorMoved(cur.line + 1, cur.ch + 1);
+            }
+          } else if (fallback) {
+            const pos = fallback.selectionStart || 0;
+            const lines = fallback.value.substring(0, pos).split('\n');
+            const line = lines.length;
+            const col = lines[lines.length - 1].length + 1;
+            if (window.AndroidBridge && window.AndroidBridge.onCursorMoved) {
+              window.AndroidBridge.onCursorMoved(line, col);
+            }
           }
         } catch (e) {
           console.error('reportCursor error:', e);
         }
       }
 
-      cm.on('cursorActivity', reportCursor);
-
-      // Content changed notification
-      cm.on('change', function(instance, changeObj) {
-        try {
-          if (changeObj.origin === 'setValue') return;
-          if (window.AndroidBridge && window.AndroidBridge.onContentChanged) {
-            window.AndroidBridge.onContentChanged(cm.getValue());
+      if (cm) {
+        cm.on('cursorActivity', reportCursor);
+        cm.on('change', function(instance, changeObj) {
+          try {
+            if (changeObj.origin === 'setValue') return;
+            if (window.AndroidBridge && window.AndroidBridge.onContentChanged) {
+              window.AndroidBridge.onContentChanged(cm.getValue());
+            }
+          } catch (e) {
+            console.error('onChange error:', e);
           }
-        } catch (e) {
-          console.error('onChange error:', e);
+        });
+      }
+
+      if (fallback) {
+        fallback.addEventListener('input', function() {
+          if (!cm && window.AndroidBridge && window.AndroidBridge.onContentChanged) {
+            window.AndroidBridge.onContentChanged(fallback.value);
+          }
+        });
+        fallback.addEventListener('keyup', reportCursor);
+        fallback.addEventListener('click', reportCursor);
+      }
+
+      container.addEventListener('click', function() {
+        if (cm) {
+          cm.focus();
+        } else if (fallback) {
+          fallback.focus();
         }
+      });
+
+      window.addEventListener('resize', function() {
+        if (cm) cm.refresh();
       });
 
       // Public API exposed on window for Android Kotlin WebView interop
       window.setCode = function(code, lang) {
         try {
-          const targetMode = getModeForLang(lang);
-          cm.setOption('mode', targetMode);
-          cm.setValue(code || '');
-          cm.clearHistory();
-          cm.scrollTo(0, 0);
-          cm.setCursor({ line: 0, ch: 0 });
-          cm.refresh();
-          setTimeout(function() { cm.refresh(); }, 30);
-          setTimeout(function() { cm.refresh(); }, 120);
-          reportCursor();
+          const text = code || '';
+          if (fallback) {
+            fallback.value = text;
+          }
+          if (cm) {
+            const targetMode = getModeForLang(lang);
+            cm.setOption('mode', targetMode);
+            cm.setValue(text);
+            cm.clearHistory();
+            cm.scrollTo(0, 0);
+            cm.setCursor({ line: 0, ch: 0 });
+            cm.refresh();
+            setTimeout(function() { cm.refresh(); }, 30);
+            setTimeout(function() { cm.refresh(); }, 120);
+            reportCursor();
+          } else {
+            if (fallback) fallback.style.display = 'block';
+            reportCursor();
+          }
         } catch (e) {
           console.error('setCode error:', e);
+          if (fallback) {
+            fallback.style.display = 'block';
+            fallback.value = code || '';
+          }
         }
       };
 
-      container.addEventListener('click', function() {
-        cm.focus();
-      });
-
-      window.addEventListener('resize', function() {
-        cm.refresh();
-      });
-      // The WebView is often laid out AFTER the page loads (inside Compose), so
-      // re-measure whenever the container size changes or the page becomes visible.
-      try {
-        if (window.ResizeObserver) {
-          new ResizeObserver(function() { cm.refresh(); }).observe(container);
-        }
-      } catch (e) {}
-      document.addEventListener('visibilitychange', function() { cm.refresh(); });
-      window.addEventListener('load', function() {
-        cm.refresh();
-        setTimeout(function() { cm.refresh(); }, 300);
-        setTimeout(function() { cm.refresh(); }, 800);
-      });
-
       window.getCode = function() {
         try {
-          return cm.getValue();
+          if (cm) return cm.getValue();
+          if (fallback) return fallback.value;
+          return '';
         } catch (e) {
           console.error('getCode error:', e);
-          return '';
+          return fallback ? fallback.value : '';
         }
       };
 
@@ -378,15 +357,15 @@
           document.body.className = '';
           if (t === 'light' || t === 'material-light' || t === 'eclipse') {
             document.body.classList.add('theme-light');
-            cm.setOption('theme', 'eclipse');
+            if (cm) cm.setOption('theme', 'eclipse');
           } else if (t === 'dracula') {
             document.body.classList.add('theme-dracula');
-            cm.setOption('theme', 'dracula');
+            if (cm) cm.setOption('theme', 'dracula');
           } else {
             document.body.classList.add('theme-dark');
-            cm.setOption('theme', 'material-darker');
+            if (cm) cm.setOption('theme', 'material-darker');
           }
-          cm.refresh();
+          if (cm) cm.refresh();
         } catch (e) {
           console.error('setTheme error:', e);
         }
@@ -395,10 +374,16 @@
       window.setFontSize = function(sizePx) {
         try {
           const size = Math.max(10, Math.min(32, Number(sizePx) || 14));
-          const el = cm.getWrapperElement();
-          if (el) {
-            el.style.fontSize = size + 'px';
-            cm.refresh();
+          if (fallback) {
+            fallback.style.fontSize = size + 'px';
+            fallback.style.lineHeight = (size * 1.4) + 'px';
+          }
+          if (cm) {
+            const el = cm.getWrapperElement();
+            if (el) {
+              el.style.fontSize = size + 'px';
+              cm.refresh();
+            }
           }
         } catch (e) {
           console.error('setFontSize error:', e);
@@ -408,9 +393,12 @@
       window.setTabSize = function(n) {
         try {
           const size = Math.max(1, Number(n) || 4);
-          cm.setOption('tabSize', size);
-          cm.setOption('indentUnit', size);
-          cm.refresh();
+          if (fallback) fallback.style.tabSize = size;
+          if (cm) {
+            cm.setOption('tabSize', size);
+            cm.setOption('indentUnit', size);
+            cm.refresh();
+          }
         } catch (e) {
           console.error('setTabSize error:', e);
         }
@@ -418,8 +406,11 @@
 
       window.setLineWrapping = function(enabled) {
         try {
-          cm.setOption('lineWrapping', !!enabled);
-          cm.refresh();
+          if (fallback) fallback.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+          if (cm) {
+            cm.setOption('lineWrapping', !!enabled);
+            cm.refresh();
+          }
         } catch (e) {
           console.error('setLineWrapping error:', e);
         }
@@ -427,8 +418,20 @@
 
       window.insertText = function(text) {
         try {
-          cm.replaceSelection(text || '', 'end');
-          cm.focus();
+          if (cm) {
+            cm.replaceSelection(text || '', 'end');
+            cm.focus();
+          } else if (fallback) {
+            const start = fallback.selectionStart;
+            const end = fallback.selectionEnd;
+            const val = fallback.value;
+            fallback.value = val.substring(0, start) + text + val.substring(end);
+            fallback.selectionStart = fallback.selectionEnd = start + text.length;
+            fallback.focus();
+            if (window.AndroidBridge && window.AndroidBridge.onContentChanged) {
+              window.AndroidBridge.onContentChanged(fallback.value);
+            }
+          }
         } catch (e) {
           console.error('insertText error:', e);
         }
@@ -436,13 +439,15 @@
 
       window.formatCode = function() {
         try {
-          const totalLines = cm.lineCount();
-          cm.operation(function() {
-            for (let i = 0; i < totalLines; i++) {
-              cm.indentLine(i);
-            }
-          });
-          cm.focus();
+          if (cm) {
+            const totalLines = cm.lineCount();
+            cm.operation(function() {
+              for (let i = 0; i < totalLines; i++) {
+                cm.indentLine(i);
+              }
+            });
+            cm.focus();
+          }
         } catch (e) {
           console.error('formatCode error:', e);
         }
@@ -450,12 +455,14 @@
 
       window.gotoLine = function(lineNum) {
         try {
-          const total = cm.lineCount();
-          const target = Math.max(0, Math.min(total - 1, (Number(lineNum) || 1) - 1));
-          cm.setCursor({ line: target, ch: 0 });
-          cm.scrollIntoView({ line: target, ch: 0 }, 100);
-          cm.focus();
-          reportCursor();
+          if (cm) {
+            const total = cm.lineCount();
+            const target = Math.max(0, Math.min(total - 1, (Number(lineNum) || 1) - 1));
+            cm.setCursor({ line: target, ch: 0 });
+            cm.scrollIntoView({ line: target, ch: 0 }, 100);
+            cm.focus();
+            reportCursor();
+          }
         } catch (e) {
           console.error('gotoLine error:', e);
         }
@@ -464,14 +471,27 @@
       window.findText = function(search, replace, replaceAll) {
         try {
           if (!search) return;
-          if (replace !== undefined && replace !== null) {
-            if (replaceAll) {
-              const cur = cm.getSearchCursor(search, { line: 0, ch: 0 });
-              cm.operation(function() {
-                while (cur.findNext()) {
-                  cur.replace(replace);
+          if (cm) {
+            if (replace !== undefined && replace !== null) {
+              if (replaceAll) {
+                const cur = cm.getSearchCursor(search, { line: 0, ch: 0 });
+                cm.operation(function() {
+                  while (cur.findNext()) {
+                    cur.replace(replace);
+                  }
+                });
+              } else {
+                let cur = cm.getSearchCursor(search, cm.getCursor('end'));
+                if (!cur.findNext()) {
+                  cur = cm.getSearchCursor(search, { line: 0, ch: 0 });
+                  cur.findNext();
                 }
-              });
+                if (cur.from()) {
+                  cur.replace(replace);
+                  cm.setSelection(cur.from(), cur.to());
+                  cm.scrollIntoView(cur.from(), 100);
+                }
+              }
             } else {
               let cur = cm.getSearchCursor(search, cm.getCursor('end'));
               if (!cur.findNext()) {
@@ -479,23 +499,18 @@
                 cur.findNext();
               }
               if (cur.from()) {
-                cur.replace(replace);
                 cm.setSelection(cur.from(), cur.to());
                 cm.scrollIntoView(cur.from(), 100);
               }
             }
-          } else {
-            let cur = cm.getSearchCursor(search, cm.getCursor('end'));
-            if (!cur.findNext()) {
-              cur = cm.getSearchCursor(search, { line: 0, ch: 0 });
-              cur.findNext();
-            }
-            if (cur.from()) {
-              cm.setSelection(cur.from(), cur.to());
-              cm.scrollIntoView(cur.from(), 100);
+            cm.focus();
+          } else if (fallback && search) {
+            const idx = fallback.value.indexOf(search, fallback.selectionEnd || 0);
+            if (idx !== -1) {
+              fallback.setSelectionRange(idx, idx + search.length);
+              fallback.focus();
             }
           }
-          cm.focus();
         } catch (e) {
           console.error('findText error:', e);
         }
@@ -503,8 +518,7 @@
 
       window.undo = function() {
         try {
-          cm.undo();
-          cm.focus();
+          if (cm) { cm.undo(); cm.focus(); }
         } catch (e) {
           console.error('undo error:', e);
         }
@@ -512,8 +526,7 @@
 
       window.redo = function() {
         try {
-          cm.redo();
-          cm.focus();
+          if (cm) { cm.redo(); cm.focus(); }
         } catch (e) {
           console.error('redo error:', e);
         }
@@ -521,8 +534,13 @@
 
       window.selectAll = function() {
         try {
-          cm.execCommand('selectAll');
-          cm.focus();
+          if (cm) {
+            cm.execCommand('selectAll');
+            cm.focus();
+          } else if (fallback) {
+            fallback.select();
+            fallback.focus();
+          }
         } catch (e) {
           console.error('selectAll error:', e);
         }
@@ -531,7 +549,7 @@
       // Notify Android that editor is initialized and ready
       function notifyReady() {
         try {
-          cm.refresh();
+          if (cm) cm.refresh();
           if (window.AndroidBridge && window.AndroidBridge.onEditorReady) {
             window.AndroidBridge.onEditorReady();
           }
@@ -545,7 +563,8 @@
       } else {
         window.addEventListener('DOMContentLoaded', notifyReady);
       }
-      setTimeout(notifyReady, 100);
+      setTimeout(notifyReady, 50);
+      setTimeout(notifyReady, 200);
     })();
   </script>
 </body>

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Code
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Badge
@@ -86,6 +88,7 @@ import com.example.data.local.entity.ProjectEntity
 import com.example.data.preferences.NexaPreferences
 import com.example.data.preferences.NexaPreferencesRepository
 import com.example.ui.screens.AboutScreen
+import com.example.ui.screens.AiAssistantScreen
 import com.example.ui.screens.BuildHistoryScreen
 import com.example.ui.screens.BuildScreen
 import com.example.ui.screens.DownloadsScreen
@@ -93,6 +96,7 @@ import com.example.ui.screens.EditorScreen
 import com.example.ui.screens.GitHubScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.NotificationsScreen
+import com.example.ui.screens.PreviewScreen
 import com.example.ui.screens.ProjectsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.NeonCyan
@@ -113,7 +117,9 @@ enum class Screen {
     DOWNLOADS,
     NOTIFICATIONS,
     SETTINGS,
-    ABOUT
+    ABOUT,
+    AI_ASSISTANT,
+    PREVIEW
 }
 
 class MainActivity : ComponentActivity() {
@@ -131,6 +137,11 @@ class MainActivity : ComponentActivity() {
         preferencesRepo = NexaPreferencesRepository(this)
         fileManager = ProjectFileManager(this)
         buildEngine = BuildEngine(this, database, fileManager)
+
+        // Security: Disable WebView debugging in release builds, enable only in debug builds
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+            android.webkit.WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        }
 
         setContent {
             val preferences by preferencesRepo.preferencesFlow.collectAsState(initial = NexaPreferences())
@@ -187,11 +198,16 @@ fun NexaMainApp(
         storageUsageBytes = fileManager.getTotalStorageUsageBytes()
     }
 
-    // Auto-seed initial project on first launch if empty
+    // Auto-seed initial project on first launch and migrate any legacy plain tokens
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            val count = database.projectDao().getAllProjects()
             refreshStorage()
+            // Keystore Token Security Migration: remove plaintext token from Room
+            val conn = database.gitHubConnectionDao().getConnection()
+            if (conn != null && conn.token.isNotBlank() && !conn.token.startsWith("SECURE_") && !conn.token.contains("••••")) {
+                com.example.data.security.SecureTokenManager.migrateLegacyTokenIfNeeded(context, conn.token)
+                database.gitHubConnectionDao().saveConnection(conn.copy(token = "SECURE_KEYSTORE_ENCRYPTED"))
+            }
         }
     }
 
@@ -394,6 +410,26 @@ fun NexaMainApp(
                     selected = currentScreen == Screen.SETTINGS,
                     onClick = {
                         currentScreen = Screen.SETTINGS
+                        coroutineScope.launch { drawerState.close() }
+                    }
+                )
+
+                DrawerMenuItem(
+                    label = "Live Preview Studio",
+                    icon = Icons.Default.Preview,
+                    selected = currentScreen == Screen.PREVIEW,
+                    onClick = {
+                        currentScreen = Screen.PREVIEW
+                        coroutineScope.launch { drawerState.close() }
+                    }
+                )
+
+                DrawerMenuItem(
+                    label = "Nexa AI Assistant",
+                    icon = Icons.Default.AutoAwesome,
+                    selected = currentScreen == Screen.AI_ASSISTANT,
+                    onClick = {
+                        currentScreen = Screen.AI_ASSISTANT
                         coroutineScope.launch { drawerState.close() }
                     }
                 )
@@ -625,17 +661,20 @@ fun NexaMainApp(
                         connection = githubConnection,
                         currentProject = activeProject,
                         onSaveConnection = { username, token, activeRepo ->
+                            // Securely store token in Keystore and store non-sensitive metadata in Room
+                            com.example.data.security.SecureTokenManager.saveGitHubToken(context, token)
                             coroutineScope.launch(Dispatchers.IO) {
                                 database.gitHubConnectionDao().saveConnection(
                                     GitHubConnectionEntity(
                                         username = username,
-                                        token = token,
+                                        token = "SECURE_KEYSTORE_ENCRYPTED",
                                         activeRepo = activeRepo
                                     )
                                 )
                             }
                         },
                         onDisconnect = {
+                            com.example.data.security.SecureTokenManager.clearGitHubToken(context)
                             coroutineScope.launch(Dispatchers.IO) {
                                 database.gitHubConnectionDao().clearConnection()
                             }
@@ -712,6 +751,30 @@ fun NexaMainApp(
                     Screen.ABOUT -> AboutScreen(
                         onBack = { currentScreen = Screen.HOME }
                     )
+
+                    Screen.AI_ASSISTANT -> AiAssistantScreen(
+                        currentFileName = activeProject?.name,
+                        currentFileContent = null,
+                        onBack = { currentScreen = Screen.HOME }
+                    )
+
+                    Screen.PREVIEW -> {
+                        val proj = activeProject ?: projects.firstOrNull()
+                        if (proj != null) {
+                            PreviewScreen(
+                                project = proj,
+                                fileManager = fileManager,
+                                onBack = { currentScreen = Screen.HOME },
+                                onNavigateToBuild = {
+                                    activeProject = it
+                                    currentScreen = Screen.BUILD
+                                }
+                            )
+                        } else {
+                            Toast.makeText(context, "No project available to preview", Toast.LENGTH_SHORT).show()
+                            currentScreen = Screen.HOME
+                        }
+                    }
 
                     Screen.EDITOR -> { /* Handled in dedicated condition above */ }
                 }

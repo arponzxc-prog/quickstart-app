@@ -7,62 +7,18 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,14 +38,12 @@ import com.example.data.local.entity.BuildEntity
 import com.example.data.local.entity.GitHubConnectionEntity
 import com.example.data.local.entity.ProjectEntity
 import com.example.ui.components.StatusChip
-import com.example.ui.theme.AmberYellow
-import com.example.ui.theme.CoralRed
-import com.example.ui.theme.EmeraldGreen
-import com.example.ui.theme.NeonCyan
-import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
-import com.example.ui.theme.Slate950
+import com.example.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuildScreen(
     projects: List<ProjectEntity>,
@@ -110,11 +64,24 @@ fun BuildScreen(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
 
+    // Build Configuration States
     var selectedBuildType by remember { mutableStateOf("DEBUG") } // DEBUG, RELEASE, BUNDLE
+    var selectedModule by remember { mutableStateOf(":app") }
     var selectedJdk by remember { mutableStateOf("17") }
-    var selectedGradle by remember { mutableStateOf("8.7") }
+    var selectedGradle by remember { mutableStateOf("8.10.2") }
     var selectedCompileSdk by remember { mutableStateOf("35") }
     var cleanBuild by remember { mutableStateOf(true) }
+
+    // Editable project configuration for build
+    var customPackageName by remember(selectedProject) { mutableStateOf(selectedProject?.packageName ?: "com.example.app") }
+    var customVersionName by remember { mutableStateOf("1.0.0") }
+    var customVersionCode by remember { mutableStateOf("1") }
+    var showConfigDialog by remember { mutableStateOf(false) }
+    var showSigningSecretDialog by remember { mutableStateOf(false) }
+
+    // Log Filter
+    var logFilter by remember { mutableStateOf("ALL") } // ALL, ERRORS, TASKS
+    var logSearchQuery by remember { mutableStateOf("") }
 
     var projectDropdownExpanded by remember { mutableStateOf(false) }
     var showMissingGitHubDialog by remember { mutableStateOf(false) }
@@ -125,8 +92,10 @@ fun BuildScreen(
             githubConnection.token.isNotBlank() &&
             !githubConnection.activeRepo.isNullOrBlank()
 
-    // Auto-scroll logs when updated
     val activeState = buildState as? BuildProgressState.Active
+    val isBuilding = activeState != null
+
+    // Auto-scroll logs when updated
     LaunchedEffect(activeState?.liveLogs) {
         if (activeState?.liveLogs?.isNotEmpty() == true) {
             logListState.animateScrollToItem((logListState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
@@ -136,6 +105,7 @@ fun BuildScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .background(Slate950)
             .testTag("build_screen"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -145,7 +115,8 @@ fun BuildScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -157,12 +128,13 @@ fun BuildScreen(
                             Text(
                                 text = "Cloud APK/AAB Builder",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
                             )
                             Text(
-                                text = "Powered by GitHub Actions CI/CD",
+                                text = "Production CI/CD powered by GitHub Actions",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = NeonCyan
                             )
                         }
 
@@ -182,11 +154,12 @@ fun BuildScreen(
                                 .testTag("select_project_dropdown"),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp), tint = NeonCyan)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = selectedProject?.name ?: "Select Project to Build",
-                                fontWeight = FontWeight.SemiBold
+                                text = selectedProject?.let { "${it.name} (${it.language})" } ?: "Select Project to Build",
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
                             )
                         }
 
@@ -196,9 +169,10 @@ fun BuildScreen(
                         ) {
                             projects.forEach { proj ->
                                 DropdownMenuItem(
-                                    text = { Text("${proj.name} (${proj.packageName})") },
+                                    text = { Text("${proj.name} • ${proj.packageName}") },
                                     onClick = {
                                         onSelectProject(proj)
+                                        customPackageName = proj.packageName
                                         projectDropdownExpanded = false
                                     }
                                 )
@@ -223,12 +197,7 @@ fun BuildScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = AmberYellow,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = AmberYellow, modifier = Modifier.size(22.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "GitHub Token & Repository Required",
@@ -239,9 +208,9 @@ fun BuildScreen(
                         }
 
                         Text(
-                            text = "Nexa IDE compiles real Android APKs using GitHub Actions runners. Without adding your GitHub Personal Access Token (PAT) and selecting an active repository, APK builds cannot be created.",
+                            text = "Nexa IDE compiles real Android APKs using GitHub Actions runners. Without connecting your GitHub Personal Access Token (PAT) and selecting an active repository, APK builds cannot be created.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = Color.White,
                             lineHeight = 18.sp
                         )
 
@@ -265,18 +234,32 @@ fun BuildScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "Build Variant",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Build Configuration",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        TextButton(onClick = { showConfigDialog = true }) {
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(14.dp), tint = NeonCyan)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Customize", fontSize = 12.sp, color = NeonCyan)
+                        }
+                    }
 
+                    // Build Variant selection chips
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = selectedBuildType == "DEBUG",
@@ -291,18 +274,114 @@ fun BuildScreen(
                         FilterChip(
                             selected = selectedBuildType == "BUNDLE",
                             onClick = { selectedBuildType = "BUNDLE" },
-                            label = { Text("Android Bundle (AAB)") }
+                            label = { Text("App Bundle (AAB)") }
                         )
                     }
 
+                    // Package metadata summary pills
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text("Module", fontSize = 10.sp, color = Color.Gray)
+                                Text(selectedModule, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text("Package ID", fontSize = 10.sp, color = Color.Gray)
+                                Text(customPackageName.takeLast(16), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NeonCyan, maxLines = 1)
+                            }
+                        }
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text("Version", fontSize = 10.sp, color = Color.Gray)
+                                Text("v$customVersionName ($customVersionCode)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                            }
+                        }
+                    }
+
+                    // SDK & Environment Info
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("JDK Runtime", fontSize = 11.sp, color = Color.Gray)
+                            Text("OpenJDK $selectedJdk", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.White)
+                        }
+                        Column {
+                            Text("Gradle Engine", fontSize = 11.sp, color = Color.Gray)
+                            Text("v$selectedGradle", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.White)
+                        }
+                        Column {
+                            Text("Compile SDK", fontSize = 11.sp, color = Color.Gray)
+                            Text("API $selectedCompileSdk", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.White)
+                        }
+                    }
+
+                    // Signing status & explanation
+                    Surface(
+                        color = Slate950,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSigningSecretDialog = true }
+                            .padding(vertical = 4.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (selectedBuildType == "DEBUG") Icons.Default.VerifiedUser else Icons.Default.Key,
+                                contentDescription = null,
+                                tint = if (selectedBuildType == "DEBUG") EmeraldGreen else AmberYellow,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (selectedBuildType == "DEBUG") "Signed with Debug Keystore (Ready for device testing)"
+                                    else "Release Signing: Uses repo secrets or local fallback key",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Tap to view production signing secret instructions",
+                                    fontSize = 10.sp,
+                                    color = NeonCyan
+                                )
+                            }
+                        }
+                    }
+
+                    // Clean Project Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Clean Project Before Build",
-                            style = MaterialTheme.typography.bodyMedium
+                            text = "Clean project before build (Recommended)",
+                            fontSize = 12.sp,
+                            color = Color.LightGray
                         )
                         Switch(
                             checked = cleanBuild,
@@ -310,26 +389,7 @@ fun BuildScreen(
                         )
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("JDK Version", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("OpenJDK $selectedJdk", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        }
-                        Column {
-                            Text("Gradle", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("v$selectedGradle", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        }
-                        Column {
-                            Text("Compile SDK", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("API $selectedCompileSdk", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        }
-                    }
-
                     // Build Trigger Action
-                    val isBuilding = activeState != null
                     Button(
                         onClick = {
                             if (!hasGitHubConnected) {
@@ -347,22 +407,18 @@ fun BuildScreen(
                             .testTag("start_build_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (hasGitHubConnected) MaterialTheme.colorScheme.primary else AmberYellow,
-                            contentColor = if (hasGitHubConnected) MaterialTheme.colorScheme.onPrimary else Color.Black
+                            containerColor = if (hasGitHubConnected) NeonPurple else AmberYellow,
+                            contentColor = if (hasGitHubConnected) Color.White else Color.Black
                         )
                     ) {
                         if (isBuilding) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.dp
-                            )
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Building on GitHub Actions...")
                         } else if (!hasGitHubConnected) {
                             Icon(Icons.Default.Key, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Connect GitHub Token to Build", fontWeight = FontWeight.Bold)
+                            Text("Connect GitHub Account to Build", fontWeight = FontWeight.Bold)
                         } else {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
@@ -373,18 +429,18 @@ fun BuildScreen(
             }
         }
 
-        // Active Build Progress Card (if running)
+        // Active Build Progress Card (Real-time Timeline & Actions)
         activeState?.let { active ->
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Slate900),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan)
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -399,55 +455,158 @@ fun BuildScreen(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = active.currentStep,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    text = "Status: ${active.status}",
+                                    fontSize = 11.sp,
                                     color = NeonCyan
                                 )
                             }
-                            IconButton(onClick = onCancelBuild) {
-                                Icon(Icons.Default.Cancel, contentDescription = "Cancel Build", tint = CoralRed)
+
+                            Row {
+                                active.runHtmlUrl?.let { url ->
+                                    IconButton(onClick = {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        context.startActivity(intent)
+                                    }) {
+                                        Icon(Icons.Default.OpenInNew, contentDescription = "View Run", tint = NeonCyan)
+                                    }
+                                }
+                                IconButton(onClick = onCancelBuild) {
+                                    Icon(Icons.Default.Cancel, contentDescription = "Cancel Build", tint = CoralRed)
+                                }
                             }
                         }
+
+                        // Granular Step Indicator
+                        Text(
+                            text = "Current Step: ${active.currentStep}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
 
                         LinearProgressIndicator(
                             progress = { active.progressPercent },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(CircleShape),
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
                             color = NeonCyan,
-                            trackColor = Slate800,
+                            trackColor = Slate800
                         )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        Text(
+                            text = "${(active.progressPercent * 100).toInt()}% completed",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.align(Alignment.End)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Live Compiler Logs Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Terminal, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Compiler Logs", fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            IconButton(onClick = {
+                                val logsToCopy = activeState?.liveLogs ?: latestBuild?.logs ?: ""
+                                clipboardManager.setText(AnnotatedString(logsToCopy))
+                                Toast.makeText(context, "Logs copied", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val rawLogs = activeState?.liveLogs ?: latestBuild?.logs ?: "No recent build logs available."
+                    val filteredLogs = remember(rawLogs, logFilter) {
+                        val lines = rawLogs.lines()
+                        when (logFilter) {
+                            "ERRORS" -> lines.filter { it.contains("error", ignoreCase = true) || it.contains("FAILED") || it.contains("e: ") }.joinToString("\n")
+                            "TASKS" -> lines.filter { it.contains("> Task") || it.contains("BUILD") }.joinToString("\n")
+                            else -> rawLogs
+                        }
+                    }
+
+                    // Filter chips
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = logFilter == "ALL",
+                            onClick = { logFilter = "ALL" },
+                            label = { Text("All", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = logFilter == "ERRORS",
+                            onClick = { logFilter = "ERRORS" },
+                            label = { Text("Errors Only", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = logFilter == "TASKS",
+                            onClick = { logFilter = "TASKS" },
+                            label = { Text("Gradle Tasks", fontSize = 11.sp) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Surface(
+                        color = Color(0xFF0d1117),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp)
+                    ) {
+                        val horizScroll = rememberScrollState()
+                        LazyColumn(
+                            state = logListState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .horizontalScroll(horizScroll)
+                                .padding(10.dp)
                         ) {
-                            Text(
-                                text = "Status: ${active.status}",
-                                fontSize = 11.sp,
-                                color = Color.Gray
-                            )
-                            Text(
-                                text = "${(active.progressPercent * 100).toInt()}%",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeonCyan
-                            )
+                            item {
+                                Text(
+                                    text = filteredLogs.ifBlank { "No logs match the current filter." },
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFc9d1d9),
+                                    lineHeight = 15.sp
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Completed Artifact Card (if available)
-        if (latestArtifact != null && activeState == null) {
+        // Latest Verified Artifact Card (with Integrity Check & Signing Status)
+        latestArtifact?.let { artifact ->
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = EmeraldGreen.copy(alpha = 0.1f)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.4f))
+                    colors = CardDefaults.cardColors(containerColor = Slate900),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldGreen)
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -455,41 +614,48 @@ fun BuildScreen(
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = EmeraldGreen,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldGreen, modifier = Modifier.size(22.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text("Verified Artifact Ready", fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text(
+                                        text = "${artifact.fileName} (${String.format(Locale.US, "%.2f MB", artifact.fileSizeBytes / (1024.0 * 1024.0))})",
+                                        fontSize = 11.sp,
+                                        color = EmeraldGreen
+                                    )
+                                }
+                            }
+                            Surface(
+                                color = EmeraldGreen.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
                                 Text(
-                                    text = "Real Artifact Ready!",
-                                    style = MaterialTheme.typography.titleMedium,
+                                    text = "ZIP VERIFIED",
+                                    color = EmeraldGreen,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = EmeraldGreen
-                                )
-                                Text(
-                                    text = "${latestArtifact.fileName} (${String.format(java.util.Locale.US, "%.1f MB", latestArtifact.fileSizeBytes / (1024.0 * 1024.0))})",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
-                            StatusChip(status = "VERIFIED")
                         }
+
+                        Text(
+                            text = "Package: ${artifact.packageName} • v${artifact.versionName}",
+                            fontSize = 12.sp,
+                            color = Color.LightGray
+                        )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Button(
-                                onClick = { onInstallApk(latestArtifact.localFilePath) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("install_apk_button"),
-                                shape = RoundedCornerShape(10.dp),
+                                onClick = { onInstallApk(artifact.localFilePath) },
+                                modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldGreen)
                             ) {
                                 Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -498,169 +664,13 @@ fun BuildScreen(
                             }
 
                             OutlinedButton(
-                                onClick = { onShareApk(latestArtifact.localFilePath) },
+                                onClick = { onShareApk(artifact.localFilePath) },
                                 modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Share APK")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Failure Assistance Card (if last build failed)
-        if (latestBuild?.status == "FAILED" && activeState == null) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = CoralRed.copy(alpha = 0.12f)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, CoralRed.copy(alpha = 0.4f))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Cancel, contentDescription = null, tint = CoralRed, modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Build Failed on GitHub Actions",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = CoralRed
-                                )
-                                Text(
-                                    text = latestBuild.errorMessage ?: "Check compiler logs on GitHub to see exact errors.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val githubUrl = latestBuild.githubRunId?.let { "https://github.com/${githubConnection?.activeRepo}/actions/runs/$it" }
-                                ?: (if (!githubConnection?.activeRepo.isNullOrBlank()) "https://github.com/${githubConnection?.activeRepo}/actions" else null)
-                            if (githubUrl != null) {
-                                Button(
-                                    onClick = {
-                                        try {
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(githubUrl))
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = CoralRed)
-                                ) {
-                                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Open GitHub Logs", fontSize = 12.sp)
-                                }
-                            }
-
-                            OutlinedButton(
-                                onClick = onNavigateToGitHub,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Default.CloudDone, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("GitHub Settings", fontSize = 12.sp)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Live Build Console Card
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(320.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Slate950),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
-            ) {
-                Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Terminal,
-                                contentDescription = null,
-                                tint = NeonCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Build Console",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val runUrl = activeState?.runHtmlUrl ?: (if (!githubConnection?.activeRepo.isNullOrBlank()) "https://github.com/${githubConnection?.activeRepo}/actions" else null)
-                            if (runUrl != null) {
-                                IconButton(onClick = {
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(runUrl))
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }) {
-                                    Icon(Icons.Default.OpenInNew, contentDescription = "View GitHub Actions", tint = NeonCyan, modifier = Modifier.size(18.dp))
-                                }
-                            }
-
-                            val logs = activeState?.liveLogs ?: latestBuild?.logs ?: "No build executed yet."
-                            IconButton(onClick = {
-                                clipboardManager.setText(AnnotatedString(logs))
-                                Toast.makeText(context, "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = Color.Gray, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Slate900, RoundedCornerShape(8.dp))
-                            .padding(10.dp)
-                    ) {
-                        val displayLogs = activeState?.liveLogs ?: latestBuild?.logs ?: "Waiting for build trigger...\nReady."
-                        LazyColumn(state = logListState) {
-                            item {
-                                Text(
-                                    text = displayLogs,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    color = Color.LightGray,
-                                    lineHeight = 16.sp
-                                )
+                                Text("Share")
                             }
                         }
                     }
@@ -669,36 +679,79 @@ fun BuildScreen(
         }
     }
 
-    // Modal: Missing GitHub Token / Repository Alert
-    if (showMissingGitHubDialog) {
+    // Modal Dialog: Customize Build Config (Package Name, Version Name, Code)
+    if (showConfigDialog) {
         AlertDialog(
-            onDismissRequest = { showMissingGitHubDialog = false },
-            icon = { Icon(Icons.Default.Key, contentDescription = null, tint = AmberYellow) },
-            title = { Text("GitHub Token Required", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { showConfigDialog = false },
+            title = { Text("Customize Build Properties", fontWeight = FontWeight.Bold) },
             text = {
-                Text(
-                    "Nexa IDE does not generate fake or demo apps. Real APK and AAB packages are compiled via GitHub Actions runners in the cloud.\n\n" +
-                    "To build your app:\n" +
-                    "1. Connect your GitHub Personal Access Token (PAT) with 'repo' and 'workflow' scopes.\n" +
-                    "2. Select the repository where your project code is synced.\n" +
-                    "3. Tap 'START BUILD' to trigger real GitHub Actions CI.",
-                    lineHeight = 20.sp
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = customPackageName,
+                        onValueChange = { customPackageName = it.trim() },
+                        label = { Text("Package ID / Application ID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = customVersionName,
+                        onValueChange = { customVersionName = it.trim() },
+                        label = { Text("Version Name (e.g. 1.0.0)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = customVersionCode,
+                        onValueChange = { customVersionCode = it.filter { c -> c.isDigit() } },
+                        label = { Text("Version Code (e.g. 1)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        showMissingGitHubDialog = false
-                        onNavigateToGitHub()
+                Button(onClick = { showConfigDialog = false }) { Text("Done") }
+            }
+        )
+    }
+
+    // Modal Dialog: Signing Secrets Explanation
+    if (showSigningSecretDialog) {
+        AlertDialog(
+            onDismissRequest = { showSigningSecretDialog = false },
+            title = { Text("Play Store Release Signing", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "To produce production-ready APKs signed with your permanent key instead of a development key, configure these secrets in your GitHub Repository settings (Settings > Secrets and variables > Actions):",
+                        fontSize = 12.sp,
+                        color = Color.LightGray
+                    )
+                    Surface(
+                        color = Color(0xFF0d1117),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "• RELEASE_KEYSTORE_BASE64: base64 of your .jks\n" +
+                                    "• STORE_PASSWORD: keystore password\n" +
+                                    "• KEY_ALIAS: alias name (e.g. upload)\n" +
+                                    "• KEY_PASSWORD: key password",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = NeonCyan,
+                            modifier = Modifier.padding(8.dp)
+                        )
                     }
-                ) {
-                    Text("Go to GitHub Settings")
+                    Text(
+                        text = "If these secrets are not configured, Nexa IDE automatically signs using an authenticated local keystore so your builds always succeed for testing.",
+                        fontSize = 11.sp,
+                        color = EmeraldGreen
+                    )
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showMissingGitHubDialog = false }) {
-                    Text("Cancel")
-                }
+            confirmButton = {
+                Button(onClick = { showSigningSecretDialog = false }) { Text("Got It") }
             }
         )
     }

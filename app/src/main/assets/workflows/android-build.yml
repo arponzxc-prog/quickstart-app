@@ -7,6 +7,14 @@ on:
         description: 'Build Type (debug, release, bundle)'
         required: true
         default: 'debug'
+      jdk_version:
+        description: 'JDK Version (17, 21)'
+        required: false
+        default: '17'
+      clean_build:
+        description: 'Clean project before build (true, false)'
+        required: false
+        default: 'true'
 
 jobs:
   build:
@@ -18,10 +26,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Java JDK 17
+      - name: Set up Java JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: ${{ github.event.inputs.jdk_version || '17' }}
           distribution: 'temurin'
 
       - name: Accept Android SDK Licenses
@@ -69,49 +77,51 @@ jobs:
           chmod +x gradlew
           ./gradlew --version
 
-      - name: Create signing keystores if missing
+      - name: Configure Signing Keystores (Production Secrets or Generated Fallback)
         working-directory: ${{ steps.detect-project.outputs.project_dir }}
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          # Use ONE fixed debug keystore (password: android) for every build, so each new APK
-          # has the same signature and can be installed over the previous one.
-          # (A random keystore per run causes "App not installed as package conflicts with an existing package".)
+          # 1. Debug Keystore (guarantee debug builds succeed)
           if [ ! -f debug.keystore ]; then
-            echo "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" | base64 -d > debug.keystore
+            echo "Creating debug.keystore for development..."
+            keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey \
+              -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
-          if [ ! -f my-upload-key.jks ]; then
+
+          # 2. Release Keystore: Use repository secret if provided, otherwise create stable local key
+          if [ -n "$RELEASE_KEYSTORE_B64" ]; then
+            echo "Decoding stable production release keystore from GitHub Secrets..."
+            echo "$RELEASE_KEYSTORE_B64" | base64 --decode > my-upload-key.jks
+          elif [ ! -f my-upload-key.jks ]; then
+            echo "Generating local upload key (no secret provided)..."
             keytool -genkeypair -v -keystore my-upload-key.jks -storepass android -alias upload \
               -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Upload,O=Nexa,C=US"
           fi
 
-      - name: Avoid package conflict with the installed Nexa IDE
-        working-directory: ${{ steps.detect-project.outputs.project_dir }}
-        run: |
-          # If this project is (a copy of) Nexa IDE itself, it has the same applicationId as the
-          # Nexa IDE app installed on the phone and Android refuses to install it
-          # ("package conflicts with an existing package"). Give the copy its own id.
-          OLD="com.aistudio.nexaide.qkrzyx"
-          for f in $(find . -maxdepth 3 \( -name build.gradle -o -name build.gradle.kts \) -not -path "*/build/*"); do
-            if grep -q "applicationId.*\"$OLD\"" "$f"; then
-              sed -i -E "s/(applicationId[ =]+\")$OLD(\")/\1$OLD.copy\2/" "$f"
-              echo "Changed applicationId in $f:"; grep -n "applicationId" "$f"
-            fi
-          done
-
       - name: Build with Gradle
         working-directory: ${{ steps.detect-project.outputs.project_dir }}
         env:
           BUILD_TYPE: ${{ github.event.inputs.build_type }}
-          STORE_PASSWORD: android
-          KEY_PASSWORD: android
+          CLEAN_BUILD: ${{ github.event.inputs.clean_build }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || 'android' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'android' }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
         run: |
           case "$BUILD_TYPE" in
             release) TASK=assembleRelease ;;
             bundle)  TASK=bundleRelease ;;
             *)       TASK=assembleDebug ;;
           esac
+
+          if [ "$CLEAN_BUILD" = "true" ]; then
+            TASK="clean $TASK"
+          fi
+
           echo "Running ./gradlew $TASK"
-          ./gradlew "$TASK" --stacktrace --no-daemon -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m"
+          ./gradlew $TASK --stacktrace --no-daemon -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m"
 
       - name: Upload APK Artifact
         if: success()

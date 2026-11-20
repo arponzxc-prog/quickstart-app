@@ -13,6 +13,7 @@ import com.example.data.local.entity.BuildArtifactEntity
 import com.example.data.local.entity.BuildEntity
 import com.example.data.local.entity.NotificationEntity
 import com.example.data.local.entity.ProjectEntity
+import com.example.data.security.SecureTokenManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,7 @@ class BuildEngine(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var currentBuildJob: Job? = null
+    private var currentActiveRunInfo: Triple<String, String, Long>? = null
 
     private val _buildState = MutableStateFlow<BuildProgressState>(BuildProgressState.Idle)
     val buildState: StateFlow<BuildProgressState> = _buildState.asStateFlow()
@@ -96,25 +98,30 @@ class BuildEngine(
                 appendLog("Mode: Real GitHub Actions CI/CD (No Mock / No Demo)")
                 updateProgress("Verifying GitHub credentials", 0.05f, "INITIALIZING")
 
-                // Step 1: Verify GitHub connection
+                // Step 1: Verify GitHub connection with Keystore-backed SecureTokenManager
                 val connection = database.gitHubConnectionDao().getConnection()
-                if (connection == null || connection.token.isBlank()) {
+                val token = SecureTokenManager.getGitHubToken(context)?.takeIf { it.isNotBlank() }
+                    ?: connection?.token
+                        ?.let { com.example.data.github.GitHubTokenSanitizer.clean(it) }
+                        ?.takeIf { it.isNotBlank() && !com.example.data.github.GitHubTokenSanitizer.isPlaceholder(it) }
+
+                if (token.isNullOrBlank()) {
                     throw IllegalStateException(
                         "No GitHub Token found. Connect your GitHub Personal Access Token (PAT) with 'repo' and 'workflow' scopes in GitHub screen before building."
                     )
                 }
 
-                val targetRepo = connection.activeRepo?.trim()
+                val targetRepo = connection?.activeRepo?.trim()
                 if (targetRepo.isNullOrBlank() || !targetRepo.contains("/")) {
                     throw IllegalStateException(
-                        "No target repository selected. Please open GitHub screen and select or create an active repository (e.g. ${connection.username}/my-app)."
+                        "No target repository selected. Please open GitHub screen and select or create an active repository (e.g. ${connection?.username ?: "username"}/my-app)."
                     )
                 }
 
                 val repoParts = targetRepo.split("/")
                 val repoOwner = repoParts[0]
                 val repoName = repoParts[1]
-                val authHeader = "Bearer ${connection.token.trim()}"
+                val authHeader = com.example.data.github.GitHubTokenSanitizer.bearer(com.example.data.github.GitHubTokenSanitizer.clean(token))
 
                 appendLog("Target GitHub Repository: $targetRepo")
                 updateProgress("Inspecting repository metadata", 0.10f, "PREPARING")
@@ -159,7 +166,11 @@ class BuildEngine(
                             workflowId = "android-build.yml",
                             payload = WorkflowDispatchPayload(
                                 ref = targetBranch,
-                                inputs = mapOf("build_type" to buildType.lowercase())
+                                inputs = mapOf(
+                                    "build_type" to buildType.lowercase(),
+                                    "jdk_version" to jdk,
+                                    "clean_build" to clean.toString()
+                                )
                             )
                         )
                         dispatchResp = resp
@@ -216,6 +227,7 @@ class BuildEngine(
                         if (targetRun != null) {
                             runId = targetRun.id
                             runHtmlUrl = targetRun.htmlUrl
+                            currentActiveRunInfo = Triple(repoOwner, repoName, targetRun.id)
                             appendLog("Found GitHub Actions Run #${targetRun.id} (Status: ${targetRun.status})")
                             appendLog("View Live: ${targetRun.htmlUrl}")
                             updateProgress("GitHub Actions running #${targetRun.id}", 0.50f, targetRun.status.uppercase(), runHtmlUrl)
@@ -414,6 +426,16 @@ class BuildEngine(
                     if (!found) {
                         throw IllegalStateException("Artifact archive did not contain a valid .apk or .aab file.")
                     }
+                }
+
+                // Verify downloaded artifact integrity
+                if (!outputApkFile.exists() || outputApkFile.length() < 1024) {
+                    throw IllegalStateException("Downloaded APK is empty or corrupted (size: ${outputApkFile.length()} bytes)")
+                }
+                val magicHeader = ByteArray(4)
+                java.io.FileInputStream(outputApkFile).use { it.read(magicHeader) }
+                if (magicHeader[0] != 0x50.toByte() || magicHeader[1] != 0x4B.toByte()) {
+                    throw IllegalStateException("Downloaded file failed validation: invalid ZIP/APK magic header.")
                 }
 
                 appendLog("APK successfully saved to: ${outputApkFile.absolutePath}")
@@ -633,10 +655,17 @@ class BuildEngine(
             treeEntries.add(TreeEntry(path = ".github/workflows/android-build.yml", mode = "100644", type = "blob", sha = workflowBlob.sha))
         }
 
-        // 4. Create Tree
+        // 4. Create Tree with parent commit base_tree to preserve unrelated repository files
+        val baseTreeSha = try {
+            val commitObj = gitHubService.getCommit(authHeader, owner, repo, headSha)
+            commitObj.tree.sha
+        } catch (e: Exception) {
+            null
+        }
+
         val treeResp = gitHubService.createTree(
             authHeader, owner, repo,
-            CreateTreeRequest(tree = treeEntries)
+            CreateTreeRequest(tree = treeEntries, baseTree = baseTreeSha)
         )
         val newTreeSha = treeResp.sha
 
@@ -671,7 +700,20 @@ class BuildEngine(
     }
 
     fun cancelCurrentBuild() {
+        val runInfo = currentActiveRunInfo
         currentBuildJob?.cancel()
+        if (runInfo != null) {
+            scope.launch {
+                try {
+                    val token = SecureTokenManager.getGitHubToken(context)
+                    if (!token.isNullOrBlank()) {
+                        gitHubService.cancelWorkflowRun(com.example.data.github.GitHubTokenSanitizer.bearer(com.example.data.github.GitHubTokenSanitizer.clean(token)), runInfo.first, runInfo.second, runInfo.third)
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
+        }
         _buildState.value = BuildProgressState.Idle
     }
 
